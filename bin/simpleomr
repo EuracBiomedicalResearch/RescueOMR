@@ -1,0 +1,154 @@
+#!/usr/bin/env python3
+# Copyright(c) 2016-2017: Yuri D'Elia <yuri.delia@eurac.edu>
+# Copyright(c) 2016-2017: EURAC, Institute of Genetic Medicine
+import argparse
+import logging
+import sys
+import re
+
+from PIL import Image, ImageDraw, ImageOps
+import numpy as np
+import scipy as sp
+import scipy.ndimage
+import lxml.etree
+
+
+# tuned for 300 dpi grayscale text
+BLACK_LEVEL = 0.80 * 255
+OVRF_THR    = 0.350
+FILL_THR    = 0.040
+VOID_THR    = 0.008
+
+# H/V line rejection
+CLEAN_LEN = 47  # window length (must be odd)
+CLEAN_W   = 3   # line width-1 (even)
+CLEAN_THR = 0.9 # rejection threshold
+
+
+def load_image(path):
+    image = Image.open(path)
+    image = image.convert('L')
+    image = ImageOps.autocontrast(image)
+    return np.array(image)
+
+
+def _svg_translate(tag, tx=0, ty=0):
+    if tag is None:
+        return tx, ty
+    trn = tag.get('transform')
+    if trn is not None:
+        grp = re.match(r'^translate\(([-\d.]+),([-\d.]+)\)$', trn)
+        if grp is None:
+            logging.error('SVG node contains unsupported transformations!')
+            sys.exit(1)
+        tx += float(grp.group(1))
+        ty += float(grp.group(2))
+    return _svg_translate(tag.getparent(), tx, ty)
+
+def load_svg_rects(path, shape):
+    data = lxml.etree.parse(path).getroot()
+    dw = shape[1] / float(data.get('width'))
+    dh = shape[0] / float(data.get('height'))
+    rects = []
+    for tag in data.findall('{*}g//{*}rect'):
+        tx, ty = _svg_translate(tag)
+        i = tag.get('id')
+        x = int((float(tag.get('x')) + tx) * dw)
+        y = int((float(tag.get('y')) + ty) * dh)
+        w = int(float(tag.get('width')) * dw)
+        h = int(float(tag.get('height')) * dh)
+        rects.append((i, x, y, w, h))
+    return rects
+
+
+def clean_image(image):
+    s = CLEAN_LEN
+    w = CLEAN_W
+    k = -np.ones(shape=(s, s))
+    k[:,s//2-w+1:s//2+w] = 1
+    k[s//2-w+1:s//2+w,:] = 1
+    tmp = sp.ndimage.convolve(image/255, k) / np.sum(k)
+    ret = image.copy()
+    ret[tmp > CLEAN_THR] = 255
+    return ret
+
+
+def scan_marks(image, marks):
+    res = []
+    for i, x, y, w, h in marks:
+        roi = image[y:y+h, x:x+w]
+        scr = (roi < BLACK_LEVEL).sum() / (w*h)
+        if scr > OVRF_THR:
+            v = 2
+        elif scr > FILL_THR:
+            v = 1
+        elif scr < VOID_THR:
+            v = 0
+        else:
+            v = -1
+        res.append((i, v, scr))
+    return res
+
+
+def debug_marks(path, image, clean, marks, res):
+    buf = Image.new('RGB', image.shape[::-1])
+    buf.paste(Image.fromarray(image, 'L'))
+    draw = ImageDraw.Draw(buf, 'RGBA')
+    for mark, row in zip(marks, res):
+        i, x, y, w, h = mark
+        v = row[1]
+        if v == 1:
+            c = (255, 0, 0, 127)
+        elif v == 0:
+            c = (0, 255, 0, 127)
+        elif v == 2:
+            c = (0, 0, 0, 64)
+        else:
+            c = (255, 127, 0, 127)
+        draw.rectangle((x, y, x+w, y+h), c)
+    bw = clean.copy()
+    thr = bw < BLACK_LEVEL
+    bw[thr] = 255
+    bw[~thr] = 0
+    buf.paste((0, 127, 255),
+              (0, 0, image.shape[1], image.shape[0]),
+              Image.fromarray(bw, 'L'))
+    buf.save(path)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('template', help='Data template (svg)')
+    ap.add_argument('image', help='Image to analyze')
+    ap.add_argument('-d', dest='debug', help='Debug marks to file')
+    ap.add_argument('-v', dest='verbose', action='count', default=0, help='Increase verbosity')
+    args = ap.parse_args()
+
+    levels = (logging.WARNING, logging.INFO, logging.DEBUG)
+    logging.basicConfig(level=levels[min(len(levels)-1, args.verbose)])
+
+    # load data
+    image = load_image(args.image)
+    marks = load_svg_rects(args.template, image.shape)
+    if len(marks) == 0:
+        logging.warn('template contains no marks')
+        return 1
+
+    # process
+    clean = clean_image(image)
+    res = scan_marks(clean, marks)
+    if args.debug:
+        debug_marks(args.debug, image, clean, marks, res)
+
+    # output
+    if args.debug:
+        for i, v, scr in res:
+            print('{}\t{}\t{}'.format(i, v, scr))
+    else:
+        for i, v, _ in res:
+            print('{}\t{}'.format(i, v))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

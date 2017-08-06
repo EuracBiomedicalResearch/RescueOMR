@@ -1,0 +1,211 @@
+#!/usr/bin/env python3
+# Copyright(c) 2016-2017: Yuri D'Elia <yuri.delia@eurac.edu>
+# Copyright(c) 2016-2017: EURAC, Institute of Genetic Medicine
+import argparse
+import sys
+import re
+
+import skimage.feature
+import skimage.measure
+import skimage.transform
+import skimage.util
+import skimage.io
+import numpy as np
+
+import warnings
+import logging
+
+
+# tuned for 300 dpi grayscale text
+CORNER_SIGMA    = 3
+CORNER_MIN_DIST = 3
+
+FEATURE_CROP_WIN = 47   # must be odd
+FEATURE_SSIM_WIN = 23   # roughly CROP_WIN/2 (odd)
+FEATURE_SSIM_K   = 4.
+FEATURE_SSIM_THR = 0.999
+
+FEATURE_MIN_SMP  = 20
+
+RANSAC_TRIALS  = 12000
+RANSAC_MIN_THR = 0.3
+
+RES_MAX_ROT   = 0.08  # (rad) ~5deg
+RES_MAX_SHEAR = 0.01  # 0.1%
+RES_MAX_SCALE = 0.4   # 4%
+
+
+def load_image(path):
+    image = skimage.io.imread(path, as_grey=True, flatten=True)
+    image = skimage.util.img_as_float(image)
+    return image
+
+
+def save_image(image, path):
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', UserWarning)
+        image = skimage.util.img_as_ubyte(image)
+    skimage.io.imsave(path, image)
+
+
+def detect_features(image):
+    data = skimage.feature.corner_harris(image, sigma=CORNER_SIGMA)
+    return skimage.feature.corner_peaks(data, min_distance=CORNER_MIN_DIST)
+
+
+def _crop_axis(dim, pos, width):
+    hw = width // 2
+    x1 = min(dim, max(0, pos - hw))
+    p1 = abs(pos - hw) - x1
+    x2 = min(dim, max(0, pos + hw))
+    p2 = abs(pos + hw) - x2
+    return x1, x2, p1, p2
+
+def crop_padded(im, pos, width):
+    assert(width % 2)
+    y1, y2, py1, py2 = _crop_axis(im.shape[0], pos[0], width)
+    x1, x2, px1, px2 = _crop_axis(im.shape[1], pos[1], width)
+    roi = im[y1:y2, x1:x2]
+    pad = [[py1, py2], [px1, px2]]
+    return skimage.util.pad(roi, pad, 'reflect')
+
+def crop_region(im, reg):
+    w, h, x, y = reg
+    return im[y:y+h, x:x+w]
+
+def extract_features(image, points, win):
+    return [crop_padded(image, point, win) for point in points]
+
+
+def parse_region(text):
+    grp = re.match(r'^(\d+)x(\d+)\+(\d+)\+(\d+)$', text)
+    if grp is None:
+        return None
+    return (int(grp.group(1)), int(grp.group(2)),
+            int(grp.group(3)), int(grp.group(4)))
+
+
+class ImageData():
+    def __init__(self, image, points, feats):
+        self.image = image
+        self.points = points
+        self.feats = feats
+
+
+def analyze_image(image):
+    points = detect_features(image)
+    feats = extract_features(image, points, FEATURE_CROP_WIN)
+    return ImageData(image, points, feats)
+
+
+class ConstrainedAffineTransform(skimage.transform.AffineTransform):
+    def __init__(self, *args, **kwargs):
+        return super(ConstrainedAffineTransform, self).__init__(*args, *kwargs)
+
+    def estimate(self, src, dst):
+        ret = super(ConstrainedAffineTransform, self).estimate(src, dst)
+        if ret is False:
+            return False
+        if abs(self.rotation) > RES_MAX_ROT:
+            return False
+        if abs(self.shear) > RES_MAX_SHEAR:
+            return False
+        if abs(1 - self.scale[0]) > RES_MAX_SCALE or \
+           abs(1 - self.scale[1]) > RES_MAX_SCALE:
+            return False
+        return True
+
+def extract_template(templ, image):
+    # check arguments
+    rs_min_smp = int(len(templ.feats) * RANSAC_MIN_THR)
+    abs_min_smp = max(FEATURE_MIN_SMP, rs_min_smp)
+    if len(templ.feats) < abs_min_smp:
+        logging.info('insufficient features in template ({}, min={})'.format(
+            len(templ.feats), abs_min_smp))
+        return None
+    if len(image.feats) < abs_min_smp:
+        logging.info('insufficient features in image ({}, min={})'.format(
+            len(image.feats), abs_min_smp))
+        return None
+
+    # match points
+    matches = []
+    for pt1, ft1 in zip(templ.points, templ.feats):
+        for pt2, ft2 in zip(image.points, image.feats):
+            ret = skimage.measure.compare_ssim(ft1, ft2, win_size=FEATURE_SSIM_WIN,
+                                               K1=FEATURE_SSIM_K, K2=FEATURE_SSIM_K)
+            if ret < FEATURE_SSIM_THR:
+                continue
+            matches.append([pt1, pt2, ret])
+    if len(matches) < abs_min_smp:
+        logging.info('insufficient matching features ({}, min={})'.format(
+            len(matches), abs_min_smp))
+        return None
+
+    # find a matching transform
+    matches = np.array(matches)
+    m1 = np.array(list(matches[:,0]))
+    m2 = np.array(list(matches[:,1]))
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        model, inliers = skimage.measure.ransac((m1, m2), ConstrainedAffineTransform,
+                                                min_samples=3, residual_threshold=3,
+                                                max_trials=RANSAC_TRIALS)
+    inliers = matches[inliers]
+    if len(inliers) < rs_min_smp:
+        logging.info('insufficient model inliers ({} of {}, min={})'.format(
+            len(inliers), len(matches), rs_min_smp))
+        return None
+
+    # extract the sub-image
+    tr = skimage.transform.AffineTransform(translation=[model.translation[1],
+                                                        model.translation[0]],
+                                           rotation=-model.rotation,
+                                           shear=-model.shear,
+                                           scale=[model.scale[1],
+                                                  model.scale[0]])
+    ret = skimage.transform.warp(image.image, tr, output_shape=templ.image.shape, order=3)
+    return ret
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument('template', help='Template to extract')
+    ap.add_argument('image', help='Image to analyze')
+    ap.add_argument('output', help='Output image')
+    ap.add_argument('-v', dest='verbose', action='count', default=0, help='Increase verbosity')
+    ap.add_argument('-r', dest='region', type=parse_region,
+                    help='Restrict analysis to image region (WxH+X+Y)')
+    ap.add_argument('-s', dest='scale', type=float,
+                    help='Prescale input image')
+    args = ap.parse_args()
+
+    levels = (logging.WARNING, logging.INFO, logging.DEBUG)
+    logging.basicConfig(level=levels[min(len(levels)-1, args.verbose)])
+
+    # load data
+    templ = load_image(args.template)
+    image = load_image(args.image)
+    if args.region is not None:
+        image = crop_region(image, args.region)
+    if args.scale is not None:
+        image = skimage.transform.rescale(image, args.scale, order=3)
+
+    # analyze images
+    templ = analyze_image(templ)
+    logging.info('found {} features in template'.format(len(templ.feats)))
+    image = analyze_image(image)
+    logging.info('found {} features in image'.format(len(image.feats)))
+
+    # extract matching template from image
+    match = extract_template(templ, image)
+    if match is None:
+        return 1
+
+    # output
+    save_image(match, args.output)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
