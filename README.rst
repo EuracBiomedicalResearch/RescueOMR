@@ -16,6 +16,10 @@ foresight.
 The checkmark structure can be reconstructed directly from the final
 print using just a sample page, Gimp_ and Inkscape_.
 
+Read the usage tutorial_ for an hands-on demonstration.
+
+.. _tutorial: https://www.thregr.org/~wavexx/software/RescueOMR/tutorial.html
+
 
 Overview
 --------
@@ -27,8 +31,8 @@ Overview
 :``simpleomr``: given a registered image and checkbox locations, returns
 		the status (ticked/unticked) of each in tabular format
 
-In the simplest usage scenario, this is how a new questionnaire is
-prepared and then processed:
+In the simplest usage scenario, the following illustrates how a new
+questionnaire is prepared and then processed:
 
 Template preparation
 ~~~~~~~~~~~~~~~~~~~~
@@ -94,8 +98,7 @@ when using high-end printing and scanning equipment.
 image-matching directly. No special tools are required: a cleaned sample
 of the region to match is all it's needed. By having no assumption on
 the underlying page structure, `RescueOMR` can easily find similar
-regions in different page layouts, often without multiple templates. The
-price to pay for such flexibility though is slower execution speed.
+regions in different page layouts, often without multiple templates.
 
 `RescueOMR` is generally not intended to substitute existing software
 when designing a *new* questionnaire from scratch. Software such as
@@ -128,7 +131,7 @@ Requirements and installation
 
 Under Debian/Ubuntu, install the required dependencies with::
 
-  sudo apt-get install python3 python3-pil python3-lxml python3-numpy
+  sudo apt-get install python3-pil python3-lxml python3-numpy
   sudo apt-get install python3-scipy python3-skimage
 
 
