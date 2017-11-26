@@ -50,7 +50,7 @@ def load_svg_rects(path, shape):
     dw = shape[1] / float(data.get('width'))
     dh = shape[0] / float(data.get('height'))
     rects = []
-    for tag in data.findall('{*}g//{*}rect'):
+    for tag in data.iterfind('.//{*}rect'):
         tx, ty = _svg_translate(tag)
         i = tag.get('id')
         x = int((float(tag.get('x')) + tx) * dw)
