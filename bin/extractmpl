@@ -67,7 +67,7 @@ def crop_padded(im, pos, width):
     x1, x2, px1, px2 = _crop_axis(im.shape[1], pos[1], width)
     roi = im[y1:y2, x1:x2]
     pad = [[py1, py2], [px1, px2]]
-    return skimage.util.pad(roi, pad, 'reflect')
+    return np.pad(roi, pad, 'reflect')
 
 def crop_region(im, reg):
     w, h, x, y = reg
