@@ -6,6 +6,7 @@ import sys
 import re
 
 import skimage.feature
+import skimage.metrics
 import skimage.measure
 import skimage.transform
 import skimage.util
@@ -36,9 +37,7 @@ RES_MAX_SCALE = 0.4   # 4%
 
 
 def load_image(path):
-    image = skimage.io.imread(path, as_grey=True, flatten=True)
-    image = skimage.util.img_as_float(image)
-    return image
+    return skimage.io.imread(path, as_gray=True)
 
 
 def save_image(image, path):
@@ -132,8 +131,9 @@ def extract_template(templ, image):
     matches = []
     for pt1, ft1 in zip(templ.points, templ.feats):
         for pt2, ft2 in zip(image.points, image.feats):
-            ret = skimage.measure.compare_ssim(ft1, ft2, win_size=FEATURE_SSIM_WIN,
-                                               K1=FEATURE_SSIM_K, K2=FEATURE_SSIM_K)
+            ret = skimage.metrics.structural_similarity(
+                ft1, ft2, win_size=FEATURE_SSIM_WIN,
+                K1=FEATURE_SSIM_K, K2=FEATURE_SSIM_K)
             if ret < FEATURE_SSIM_THR:
                 continue
             matches.append([pt1, pt2, ret])
