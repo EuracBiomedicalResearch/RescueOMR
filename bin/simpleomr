@@ -126,6 +126,7 @@ def main():
 
     levels = (logging.WARNING, logging.INFO, logging.DEBUG)
     logging.basicConfig(level=levels[min(len(levels)-1, args.verbose)])
+    logging.getLogger().name = ap.prog
 
     # load data
     image = load_image(args.image)

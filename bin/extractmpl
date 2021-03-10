@@ -182,6 +182,7 @@ def main():
 
     levels = (logging.WARNING, logging.INFO, logging.DEBUG)
     logging.basicConfig(level=levels[min(len(levels)-1, args.verbose)])
+    logging.getLogger().name = ap.prog
 
     # load data
     templ = load_image(args.template)
