@@ -113,7 +113,7 @@ by custom scripting and validation.
 documents only. When scanning your questionnaires, be sure to set the
 scanning parameters to 300 dpi gray-scale, possibly without compression.
 
-.. _SDAPS: http://sdaps.org/
+.. _SDAPS: https://sdaps.org/
 .. _queXF: https://quexf.acspri.org.au/
 
 
