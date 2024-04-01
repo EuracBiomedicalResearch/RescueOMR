@@ -18,7 +18,7 @@ print using just a sample page, Gimp_ and Inkscape_.
 
 Read the usage tutorial_ for an hands-on demonstration.
 
-.. _tutorial: https://www.thregr.org/~wavexx/software/RescueOMR/tutorial.html
+.. _tutorial: https://www.thregr.org/wavexx/software/RescueOMR/tutorial.html
 
 
 Overview
@@ -257,7 +257,7 @@ answer.
 Authors and Copyright
 ---------------------
 
-`RescueOMR` can be found at https://www.thregr.org/~wavexx/software/RescueOMR/
+`RescueOMR` can be found at https://www.thregr.org/wavexx/software/RescueOMR/
 
 | `RescueOMR` is distributed under GNU AGPLv3+, WITHOUT ANY WARRANTY.
 | Copyright(c) 2016-2017: Yuri D'Elia <yuri.delia@eurac.edu>
